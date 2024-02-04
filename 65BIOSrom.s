@@ -83,6 +83,7 @@ lda #0
 sta mode
 jmp welcomemsg ; Get ready for new code
 
+; BIOS Segment START
 .segment "RODATA"
 .org $F000 ; Not strictly needed with CA65 but shows correct address in listing.txt
 nmi:
@@ -124,28 +125,36 @@ reset:
   ; BIT FOOBAR will put bit 7 of FOOBAR's contents into the N flag, 
   ; and bit 6 into the V flag, so you can branch on these without loading first.
   bit DRB ; test bit 6 & 7 
-  ; BTN Pressed = LOW
-  bvc welcomemsg ; branch to welcome if BTN Pressed = bit 6 is clear
+  ; BTN ON = LOW = bit 6 is Clear
+  bvc welcomemsg ; branch to welcome if BTN ON
+  ; BTN Off fallthough to bootloader
+
+bootloader:  ; Start Serial Bootloader
   lda #1
   sta mode
   lda #<ready
   sta stringp
   lda #>ready
   sta stringp+1
-  jsr ssd1306_wstring
+  jsr ssd1306_wstring ; Print Ready to load
   clc
-  bcc main
+  bcc main ; @todo: replace this with a JMP maybe?
 
-welcomemsg:
+welcomemsg: ; Print Welcome Message and 
   lda #<welcome
   sta stringp
   lda #>welcome
   sta stringp+1
   jsr ssd1306_wstring
+  ; fallthough to main loop
 
 main:
-  bit DRB     ; LED in bit 7, Check
-  bpl ledoff  ; LED on, turn it off > branch on plus (negative clear)
+  ; this shoud be just and 
+  ; lda DRB
+  ; eor #$80
+  ; sta DRB 
+  bit DRB     ; LED in bit 7, Check bit 7 clear = led ON
+  bpl ledoff  ; branch on plus (negative clear) = LED on, turn it off 
   lda DRB     ; LED off, turn it on
   and #$7f    ; Bit low == ON
   sta DRB
@@ -156,8 +165,10 @@ ledoff:
   sta DRB
 l71:
   lda #244
-  bit DRB
-  bvs quartersecond ;  branch if BTN NOT Pressed = bit 6 is SET @why
+  ; why is checking here is the button is pressed to clear the screen
+  bit DRB ; test bit 6 & 7 
+  ; BTN ON = LOW = bit 6 is Clear
+  bvs quartersecond ;  branch if BTN NOT Pressed = bit 6 is SET
   sta WTD64DI ; 244*64 = 15616 ~= 16ms
   jsr ssd1306_clear ; We only end up here if button is pressed
   bne wait ; BRA
@@ -167,6 +178,7 @@ quartersecond:
 
 gonoserial:
 jmp noserial
+
 wait:
 lda DRA ; Check serial 3c
 and #%11111011 ; CTS low
