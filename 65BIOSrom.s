@@ -17,7 +17,7 @@ stringp = I2CRAM +4 ; (and +5) Pointer to string in mem to print
 
 timer2  = stringp ; We're not going to be printing strings while waiting for timer2
 ;Stringp +1 free for temp.
-mode  = stringp +2
+mode  = stringp +2 ; mode 0 text echo (ASCII), mode 1 program loading (bin)
 rxcnt   = stringp + 3
 txcnt   = rxcnt +1
 runpnt  = txcnt +1
@@ -166,19 +166,22 @@ ledoff:
 l71:
   lda #244
   ; why is checking here is the button is pressed to clear the screen
+  ; bit 7 goes to N and bit 6 goes to V
   bit DRB ; test bit 6 & 7 
   ; BTN ON = LOW = bit 6 is Clear
-  bvs quartersecond ;  branch if BTN NOT Pressed = bit 6 is SET
+  bvs quartersecond ;  branch to quartersecond if BTN is OFF = bit 6 is SET
   sta WTD64DI ; 244*64 = 15616 ~= 16ms
   jsr ssd1306_clear ; We only end up here if button is pressed
   bne wait ; BRA
 quartersecond:
   sta WTD1KDI ; 244 * 1024 = 249856 ~= quarter second
-  bne wait ; BRA
+  bne wait ; BRA @why is always bra? the bit operation will be setting bit 7
 
+; this is here to enable the branching 
 gonoserial:
-jmp noserial
+  jmp noserial
 
+; this wait label is the serial routine 
 wait:
 lda DRA ; Check serial 3c
 and #%11111011 ; CTS low
