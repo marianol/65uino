@@ -108,7 +108,7 @@ reset:
   ; Initialize Port A
   lda #%00000110  ; Bit 1 is serial TX (Output) & 2 (CTS)
   sta DDRA
-  lda #%11111001  ; Set outputs as High @why
+  lda #%11111001  ; Bit 0 is serial RX (input), other bits as inputs also not sure @why
   sta DRA
   jsr qsdelay ; .25s delay
   ; Initialize I2C ssd1306 Display 
@@ -181,90 +181,94 @@ quartersecond:
 gonoserial:
   jmp noserial
 
-; this wait label is the serial routine 
+; this wait label is the serial routine ??
 wait:
-lda DRA ; Check serial 3c
-and #%11111011 ; CTS low
-sta DRA
-and #$01 ; 2c
-bne gonoserial ; 2c
-tay ; A already 0
-sta txcnt
-lda #64 ; RX wait loop below is 16 cycles
-sta timer2
+  ; Check serial RX 
+  lda DRA ;  3 cycles
+  and #%11111011 ; CTS low
+  sta DRA
+  ; check for RX by testing DRA Bit 0
+  ; serial TX Start bit is low 
+  and #$01 ; 2 cycles
+  bne gonoserial ; 2 cycles | if (A && $01) != 0 jump to noserial -- Bit 0 is high
+  ; someone is sending data
+  tay ; init buffer pointer, A already 0
+  sta txcnt
+  lda #64 ; RX wait loop below is 16 cycles @ 1 usec each
+  sta timer2 ; init timeout counter | 3 cycles 
+  rx:
+    dec timer2 ; 5 cycles
+    beq rxtimeout ; Branch if timeout | 2 cycles (+1 if taken) 
+    lda DRA ; Check serial 3 cycles
+    and #$01 ; 2 cycles
+    bne rx ; Wait for RX until timeout | 2 cycles (+1 if taken) 
+  lda #64
+  sta timer2 ; Reset timer | 3 cycles 
+  gorx: ; This label is not used ??
+  jsr serial_rx ; RX byte in A | 6 cycles
+  sta serialbuf, y
+  cpy #128-25 ; check if er still have space. Leaves 9 bytes for stack
+  beq rx_err ; buffer overflow
+  iny
+  bne rx ; BRA (Y never 0)
+  rx_err:
+    sty rxcnt
+    lda DRA 
+    ora #4 ; CTS high to stop TX
+    sta DRA
+    lda #$13 ; XOFF
+    jsr serial_tx ; Inform sender we're out of buffer space
+    lda #<overflow
+    sta stringp
+    lda #>overflow
+    sta stringp+1
+    jsr ssd1306_wstring
+    clc
+    bcc tx ; BRA    
+rxtimeout: ; Nothing in the RX line
+  sty rxcnt
+  lda mode ; mode 0 text echo (ASCII), mode 1 program loading (bin)
+  beq txt ; got to echo mode
+  cmp #1 ; we only have 2 modes so this is a bit redundant
+  bne txt ; got to echo mode
+  ;Time to parse data instead of txt - aka, our bootloader!
+  jsr ssd1306_clear
+  lda #<loaded
+  sta stringp
+  lda #>loaded
+  sta stringp+1
+  jsr ssd1306_wstring
 
-rx:
-dec timer2
-beq rxtimeout ; Branch if timeout
-lda DRA ; Check serial 3c
-and #$01 ; 2c
-bne rx ; Wait for RX until timeout
-lda #64
-sta timer2 ; Reset timer
-gorx:
-jsr serial_rx ; 6c
-sta serialbuf, y
-cpy #128-25 ; Leaves 9 bytes for stack
-beq rx_err
-iny
-bne rx ; BRA (Y never 0)
-rx_err:
-sty rxcnt
-lda DRA ;
-ora #4 ; CTS high
-sta DRA
-lda #$13 ; XOFF
-jsr serial_tx ; Inform sender we're out of buffer space
-lda #<overflow
-sta stringp
-lda #>overflow
-sta stringp+1
-jsr ssd1306_wstring
-clc
-bcc tx ; BRA
-rxtimeout:
-sty rxcnt
-lda mode
-beq txt
-cmp #1
-bne txt
-;Time to parse data instead of txt - aka, our bootloader!
-jsr ssd1306_clear
-lda #<loaded
-sta stringp
-lda #>loaded
-sta stringp+1
-jsr ssd1306_wstring
+  lda rxcnt
+  jsr printbyte
 
-lda rxcnt
-jsr printbyte
+  lda #<bytes
+  sta stringp
+  lda #>bytes
+  sta stringp+1
+  jsr ssd1306_wstring
 
-lda #<bytes
-sta stringp
-lda #>bytes
-sta stringp+1
-jsr ssd1306_wstring
+waittorun: ; BIN file loaded 
+  jsr qsdelay ; @todo change this to a loop until BTN is pressed
+  jsr qsdelay
+  jsr qsdelay
+  jsr qsdelay
+  jsr ssd1306_clear
+  lda #0
+  sta cursor
+  jsr ssd1306_setline
+  lda #0
+  jsr ssd1306_setcolumn
 
-waittorun:
-jsr qsdelay
-jsr qsdelay
-jsr qsdelay
-jsr qsdelay
-jsr ssd1306_clear
-lda #0
-sta cursor
-jsr ssd1306_setline
-lda #0
-jsr ssd1306_setcolumn
+  ;lda #<userland
+  ;sta runpnt
+  ;lda #>userland
+  ;sta runpnt+1
 
-;lda #<userland
-;sta runpnt
-;lda #>userland
-;sta runpnt+1
+  ;jmp (runpnt)
+  jmp userland
 
-;jmp (runpnt)
-jmp userland
-
+; Text echo mode: serial RX is printed to the OLED in ASCII
 txt:
 lda DRA ;
 ora #4 ; CTS high
@@ -777,6 +781,7 @@ serial_rx:
   lda inb ; Put in A
   rts
 
+;Transmit byte in A 
 serial_tx:
   sta outb
   lda #$fd ; Inverse bit 1
@@ -814,6 +819,7 @@ serial_tx:
   jsr delay_short
   rts
 
+;Prints A to LCD screen
 printbyte:
   pha ; Save A
   jsr bytetoa
