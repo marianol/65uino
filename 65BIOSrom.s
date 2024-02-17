@@ -125,7 +125,7 @@ reset:
   ; BIT FOOBAR will put bit 7 of FOOBAR's contents into the N flag, 
   ; and bit 6 into the V flag, so you can branch on these without loading first.
   bit DRB ; test bit 6 & 7 
-  ; BTN ON = LOW = bit 6 is Clear
+  ; BTN ON = LOW = bit 6 and V is Clear
   bvc welcomemsg ; branch to welcome if BTN ON
   ; BTN Off fallthough to bootloader
 
@@ -228,12 +228,13 @@ wait:
 rxtimeout: ; Nothing in the RX line
   sty rxcnt
   lda mode ; mode 0 text echo (ASCII), mode 1 program loading (bin)
-  beq txt ; got to echo mode
+  beq txt ;  mode = 0 then got to echo
   cmp #1 ; we only have 2 modes so this is a bit redundant
-  bne txt ; got to echo mode
-  ;Time to parse data instead of txt - aka, our bootloader!
-  jsr ssd1306_clear
-  lda #<loaded
+  bne txt ; node NOT 1 so got to echo mode
+  ;fallthough to bootloader when mode NOT 0 
+  ;Time to parse data instead of ASCII 
+  jsr ssd1306_clear 
+  lda #<loaded ; display loaded bytes
   sta stringp
   lda #>loaded
   sta stringp+1
@@ -247,13 +248,14 @@ rxtimeout: ; Nothing in the RX line
   lda #>bytes
   sta stringp+1
   jsr ssd1306_wstring
+  ; fallthough
 
 waittorun: ; BIN file loaded 
-  jsr qsdelay ; @todo change this to a loop until BTN is pressed
+  jsr qsdelay ; Delay 1 second@todo change this to a loop until BTN is pressed
   jsr qsdelay
   jsr qsdelay
   jsr qsdelay
-  jsr ssd1306_clear
+  jsr ssd1306_clear 
   lda #0
   sta cursor
   jsr ssd1306_setline
@@ -270,39 +272,43 @@ waittorun: ; BIN file loaded
 
 ; Text echo mode: serial RX is printed to the OLED in ASCII
 txt:
-lda DRA ;
-ora #4 ; CTS high
-sta DRA
-lda #$13 ; XOFF
-jsr serial_tx ; Inform sender to chill while we write stuff to screen
+  lda DRA ;
+  ora #4 ; CTS high
+  sta DRA
+  lda #$13 ; XOFF
+  jsr serial_tx ; Inform sender to chill while we write stuff to screen
 
 tx:
-ldy txcnt
-bne notfirst
-lda serialbuf, y
-cmp #$01 ; SOH
-bne notfirst
-sta mode
-jmp main ; Bootloader character via serial
-notfirst:
-cpy rxcnt
-beq txdone
-lda serialbuf, y
-jsr ssd1306_sendchar
-inc txcnt
-jmp tx
+  ldy txcnt
+  bne notfirst ; not the first character
+  lda serialbuf, y
+  cmp #$01 ; Check for SOH = SOH as the first char will force bootloader mode
+  bne notfirst
+  sta mode ; set bootloader mode (mode = 1)
+  jmp main ; Got a start main routine in bootloader mode, character (SOH) via serial
+notfirst: ; Not the first byte just add it to the buffer
+  cpy rxcnt ; ?? @why
+  beq txdone ; @check did we loop
+  lda serialbuf, y
+  jsr ssd1306_sendchar ; echo the RX char to the screen
+  inc txcnt
+  jmp tx
+
+; Nothing in the RX port
 noserial:
 lda READTDI
 bne gowait ; Loop until timer runs out
 jmp main ; loop
-txdone:
-lda DRA ;
-and #$fb ; CTS low
-sta DRA
-lda #$11 ; XON
-jsr serial_tx
+
+txdone: ; TX is complete set CTS and XON
+  lda DRA ;
+  and #$fb ; CTS low
+  sta DRA
+  lda #$11 ; XON
+  jsr serial_tx
+  
 gowait:
-jmp wait
+  jmp wait
 
 ; Messages
 ; Display Width 16 characters
