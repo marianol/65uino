@@ -67,8 +67,15 @@ userland:
 
 lda #'@'
 jsr ssd1306_sendchar
+lda #'>'
+jsr ssd1306_sendchar
+lda #<hellord
+sta stringp
+lda #>hellord
+sta stringp+1
+jsr ssd1306_wstring ; Print Ready to load
 
-; Serial echo in Hex
+; Serial echo in Hex ?
 w4serial: 
 lda DRA ; Check serial 3c
 and #$01 ; 2c
@@ -76,6 +83,9 @@ bne w4serial ; 2c
 jsr serial_rx ; Get character
 jsr printbyte
 jmp w4serial
+
+hellord:
+.asciiz "Hello World!"
 
 ; END User Program
 halt:
